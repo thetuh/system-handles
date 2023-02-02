@@ -21,6 +21,7 @@ int main( )
 			status = NtQuerySystemInformation( SystemHandleInformation, handle_info, size, &size );
 			if ( status == STATUS_INFO_LENGTH_MISMATCH )
 			{
+				/* buffer wasn't big enough, free the memory and expand it */
 				VirtualFree( handle_info, 0, MEM_RELEASE );
 				size *= 2;
 			}
@@ -43,20 +44,33 @@ int main( )
 				if ( !process_handle )
 					continue;
 
+				/* we need to duplicate the handle in order to query the object information */
 				HANDLE duplicate_handle{ };
 				DuplicateHandle( process_handle, ( HANDLE )current_handle->Handle, GetCurrentProcess( ), &duplicate_handle, PROCESS_QUERY_LIMITED_INFORMATION, FALSE, 0 );
 				if ( !duplicate_handle )
 					continue;
 
-				/* query the object information of the handle */
+				/* query the object information of the newly duplicated handle */
 				if ( NtQueryObject( duplicate_handle, ObjectTypeInformation, object_info, 0x1000, NULL ) == STATUS_SUCCESS )
 				{
-					/* if the object type is a process, print out its path */
+					/* if the object type is a process, check its name to see if the handle is open to us */
 					if ( wcsncmp( object_info->TypeName.Buffer, L"Process", object_info->TypeName.Length + 1 ) == 0 )
 					{
 						char path[ MAX_PATH ];
 						if ( GetProcessImageFileNameA( duplicate_handle, path, MAX_PATH ) )
-							std::cout << path << std::endl;
+						{
+							const std::string_view sv_path{ path };
+							if ( sv_path.ends_with( "handles.exe" ) )
+								std::cout << "found handle to our process\n";
+
+							/*
+							* @todo:
+							*	check to see if it's an essential handle
+							*		(e.g. lsass, csrss, etc. require handles to each process within the OS)
+							*		strip/reduce its access rights if not
+							*/
+						}
+
 					}
 				}
 			}
