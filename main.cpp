@@ -1,6 +1,7 @@
 
 #include <Windows.h>
 #include <iostream>
+#include <Psapi.h>
 
 #include "native.h"
 
@@ -39,15 +40,25 @@ int main( )
 
 				/* we need a handle to the process with PROCESS_DUP_HANDLE access rights */
 				const HANDLE process_handle{ OpenProcess( PROCESS_DUP_HANDLE, false, current_handle->ProcessId ) };
-				if ( process_handle == INVALID_HANDLE_VALUE )
+				if ( !process_handle )
 					continue;
 
 				HANDLE duplicate_handle{ };
-				DuplicateHandle( process_handle, current_handle, GetCurrentProcess( ), &duplicate_handle, PROCESS_QUERY_LIMITED_INFORMATION, FALSE, 0 );
-				if ( duplicate_handle == INVALID_HANDLE_VALUE )
+				DuplicateHandle( process_handle, ( HANDLE )current_handle->Handle, GetCurrentProcess( ), &duplicate_handle, PROCESS_QUERY_LIMITED_INFORMATION, FALSE, 0 );
+				if ( !duplicate_handle )
 					continue;
 
-
+				/* query the object information of the handle */
+				if ( NtQueryObject( duplicate_handle, ObjectTypeInformation, object_info, 0x1000, NULL ) == STATUS_SUCCESS )
+				{
+					/* if the object type is a process, print out its path */
+					if ( wcsncmp( object_info->TypeName.Buffer, L"Process", object_info->TypeName.Length + 1 ) == 0 )
+					{
+						char path[ MAX_PATH ];
+						if ( GetProcessImageFileNameA( duplicate_handle, path, MAX_PATH ) )
+							std::cout << path << std::endl;
+					}
+				}
 			}
 
 			VirtualFree( object_info, 0, MEM_RELEASE );
@@ -55,7 +66,7 @@ int main( )
 
 		VirtualFree( handle_info, 0, MEM_RELEASE );
 
-		Sleep( 100 );
+		Sleep( 10000 );
 	}
 
 }
