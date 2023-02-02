@@ -7,6 +7,7 @@
 
 int main( )
 {
+	const HANDLE my_process{ GetCurrentProcess( ) };
 	const DWORD my_pid{ GetCurrentProcessId( ) };
 
 	NTSTATUS status{ };
@@ -31,6 +32,8 @@ int main( )
 		{
 			POBJECT_TYPE_INFORMATION object_info = ( POBJECT_TYPE_INFORMATION ) VirtualAlloc( NULL, 0x1000, MEM_COMMIT, PAGE_READWRITE );
 
+			size_t handles{ };
+
 			for ( DWORD i = 0; i < handle_info->HandleCount; ++i )
 			{
 				const auto current_handle = &handle_info->Handles[ i ];
@@ -40,7 +43,7 @@ int main( )
 					continue;
 
 				/* we need a handle to the process with PROCESS_DUP_HANDLE access rights */
-				const HANDLE process_handle{ OpenProcess( PROCESS_DUP_HANDLE, false, current_handle->ProcessId ) };
+				const HANDLE process_handle{ OpenProcess( PROCESS_DUP_HANDLE | PROCESS_VM_OPERATION | PROCESS_VM_WRITE, false, current_handle->ProcessId ) };
 				if ( !process_handle )
 					continue;
 
@@ -48,32 +51,28 @@ int main( )
 				HANDLE duplicate_handle{ };
 				DuplicateHandle( process_handle, ( HANDLE )current_handle->Handle, GetCurrentProcess( ), &duplicate_handle, PROCESS_QUERY_LIMITED_INFORMATION, FALSE, 0 );
 				if ( !duplicate_handle )
-					continue;
-
-				/* query the object information of the newly duplicated handle */
-				if ( NtQueryObject( duplicate_handle, ObjectTypeInformation, object_info, 0x1000, NULL ) == STATUS_SUCCESS )
 				{
-					/* if the object type is a process, check its name to see if the handle is open to us */
-					if ( wcsncmp( object_info->TypeName.Buffer, L"Process", object_info->TypeName.Length + 1 ) == 0 )
-					{
-						char path[ MAX_PATH ];
-						if ( GetProcessImageFileNameA( duplicate_handle, path, MAX_PATH ) )
-						{
-							const std::string_view sv_path{ path };
-							if ( sv_path.ends_with( "handles.exe" ) )
-								std::cout << "found handle to our process\n";
-
-							/*
-							* @todo:
-							*	check to see if it's an essential handle
-							*		(e.g. lsass, csrss, etc. require handles to each process within the OS)
-							*		strip/reduce its access rights if not
-							*/
-						}
-
-					}
+					CloseHandle( process_handle );
+					continue;
 				}
+
+				/* check if the handle is opened us */
+				if ( GetProcessId( duplicate_handle ) == my_pid )
+				{
+					char process_name[ MAX_PATH ];
+					GetModuleFileNameEx( process_handle, NULL, process_name, MAX_PATH );
+
+					std::cout << process_name << std::endl;
+
+					handles++;
+				}
+
+				CloseHandle( duplicate_handle );
+				CloseHandle( process_handle );
 			}
+
+			std::cout << "opened handles to our process: " << handles << "\n";
+			std::cout << "------------------------------------------------\n";
 
 			VirtualFree( object_info, 0, MEM_RELEASE );
 		}
