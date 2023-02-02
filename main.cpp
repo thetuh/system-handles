@@ -1,95 +1,61 @@
 
 #include <Windows.h>
 #include <iostream>
-#include <winternl.h>
 
-#pragma comment( lib, "ntdll.lib" )
-
-#define STATUS_SUCCESS 0x00000000
-#define STATUS_INFO_LENGTH_MISMATCH 0xC0000004
-
-static constexpr auto SystemHandleInformation = ( SYSTEM_INFORMATION_CLASS ) 0x10;
-
-typedef struct _SYSTEM_HANDLE
-{
-	ULONG ProcessId;
-	BYTE ObjectTypeNumber;
-	BYTE Flags;
-	USHORT Handle;
-	PVOID Object;
-	ACCESS_MASK GrantedAccess;
-} SYSTEM_HANDLE, * PSYSTEM_HANDLE;
-
-typedef struct _SYSTEM_HANDLE_INFORMATION
-{
-	ULONG HandleCount;
-	SYSTEM_HANDLE Handles[ 1 ];
-} SYSTEM_HANDLE_INFORMATION, * PSYSTEM_HANDLE_INFORMATION;
-
-typedef struct _OBJECT_TYPE_INFORMATION {
-	UNICODE_STRING TypeName;
-	ULONG TotalNumberOfObjects;
-	ULONG TotalNumberOfHandles;
-} OBJECT_TYPE_INFORMATION, * POBJECT_TYPE_INFORMATION;
-
-typedef struct _OBJECT_BASIC_INFORMATION
-{
-	ULONG Attributes;
-	ACCESS_MASK GrantedAccess;
-	ULONG HandleCount;
-	ULONG PointerCount;
-	ULONG PagedPoolCharge;
-	ULONG NonPagedPoolCharge;
-	ULONG Reserved[ 3 ];
-	ULONG NameInfoSize;
-	ULONG TypeInfoSize;
-	ULONG SecurityDescriptorSize;
-	LARGE_INTEGER CreationTime;
-} OBJECT_BASIC_INFORMATION, * POBJECT_BASIC_INFORMATION;
+#include "native.h"
 
 int main( )
 {
 	const DWORD my_pid{ GetCurrentProcessId( ) };
 
-	// TODO: enumerate through processlist, attach to it, and run the procedure below for each one
+	NTSTATUS status{ };
+	ULONG size{ 0x10000 };
+	PSYSTEM_HANDLE_INFORMATION handle_info{ };
 
-	NTSTATUS returnVal;
-	ULONG dataLength = 0x10000;
-	PSYSTEM_HANDLE_INFORMATION handleInfo = NULL;
-
-	// Query the system handles. If the call fails because of a length mismatch, recreate a bigger buffer and try again.
-	do
+	while ( true )
 	{
-		handleInfo = ( PSYSTEM_HANDLE_INFORMATION ) VirtualAlloc( NULL, dataLength, MEM_COMMIT, PAGE_READWRITE );
-		returnVal = NtQuerySystemInformation( SystemHandleInformation, handleInfo, dataLength, &dataLength );
-		if ( returnVal == STATUS_INFO_LENGTH_MISMATCH )
+		do
 		{
-			// The length of the buffer was not sufficient. Expand the buffer before retrying.
-			VirtualFree( handleInfo, 0, MEM_RELEASE );
-			dataLength *= 2;
-		}
-	} while ( returnVal == STATUS_INFO_LENGTH_MISMATCH );
+			handle_info = ( PSYSTEM_HANDLE_INFORMATION ) VirtualAlloc( NULL, size, MEM_COMMIT, PAGE_READWRITE );
+			status = NtQuerySystemInformation( SystemHandleInformation, handle_info, size, &size );
+			if ( status == STATUS_INFO_LENGTH_MISMATCH )
+			{
+				VirtualFree( handle_info, 0, MEM_RELEASE );
+				size *= 2;
+			}
+		} while ( status == STATUS_INFO_LENGTH_MISMATCH );
 
-	if ( returnVal == STATUS_SUCCESS )
-	{
-		// The system query succeeded, let's allocate buffers to hold the necessary information.
-		POBJECT_TYPE_INFORMATION objInfo = ( POBJECT_TYPE_INFORMATION ) VirtualAlloc( NULL, 0x1000, MEM_COMMIT, PAGE_READWRITE );
-
-		for ( DWORD i = 0; i < handleInfo->HandleCount; ++i )
+		if ( status == STATUS_SUCCESS )
 		{
-			const auto curHandle = &handleInfo->Handles[ i ];
-			
-			// Skip the occurrences in the process does not own the handle.
-			if ( curHandle->ProcessId != current_pid )
-				continue;
+			POBJECT_TYPE_INFORMATION object_info = ( POBJECT_TYPE_INFORMATION ) VirtualAlloc( NULL, 0x1000, MEM_COMMIT, PAGE_READWRITE );
 
-			// TODO: query the handle information and check if it's opened to us
+			for ( DWORD i = 0; i < handle_info->HandleCount; ++i )
+			{
+				const auto current_handle = &handle_info->Handles[ i ];
+
+				/* we aren't interested in handles we own */
+				if ( current_handle->ProcessId == my_pid )
+					continue;
+
+				/* we need a handle to the process with PROCESS_DUP_HANDLE access rights */
+				const HANDLE process_handle{ OpenProcess( PROCESS_DUP_HANDLE, false, current_handle->ProcessId ) };
+				if ( process_handle == INVALID_HANDLE_VALUE )
+					continue;
+
+				HANDLE duplicate_handle{ };
+				DuplicateHandle( process_handle, current_handle, GetCurrentProcess( ), &duplicate_handle, PROCESS_QUERY_LIMITED_INFORMATION, FALSE, 0 );
+				if ( duplicate_handle == INVALID_HANDLE_VALUE )
+					continue;
+
+
+			}
+
+			VirtualFree( object_info, 0, MEM_RELEASE );
 		}
 
-		// Free allocated query objects.
-		VirtualFree( objInfo, 0, MEM_RELEASE );
+		VirtualFree( handle_info, 0, MEM_RELEASE );
+
+		Sleep( 100 );
 	}
 
-	// Free heap allocated handle information.
-	VirtualFree( handleInfo, 0, MEM_RELEASE );
 }
