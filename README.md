@@ -1,2 +1,2 @@
 # system-handles
-A program focused on querying system handle information
+This program queries all the handles within the system and checks if any of them are opened to our own process
