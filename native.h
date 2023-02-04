@@ -215,6 +215,8 @@ using NtQuerySystemInformation_t = NTSTATUS( __stdcall* )(
     PULONG                      ReturnLength
     );
 
+typedef NTSTATUS( NTAPI* RtlAdjustPrivilege_fn )( ULONG Privilege, BOOLEAN Enable, BOOLEAN CurrentThread, PBOOLEAN Enabled );
+
 typedef struct _SYSTEM_HANDLE
 {
 	ULONG ProcessId;

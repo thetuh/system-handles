@@ -7,6 +7,12 @@
 
 int main( )
 {
+	RtlAdjustPrivilege_fn RtlAdjustPrivilege = ( RtlAdjustPrivilege_fn ) GetProcAddress( GetModuleHandle( "ntdll" ), "RtlAdjustPrivilege" );
+
+	/* give our program SeDebugPrivileges which allows us to retrieve handles from system processes  */
+	BOOLEAN boAdjustPrivRet;
+	RtlAdjustPrivilege( 20, TRUE, FALSE, &boAdjustPrivRet );
+
 	const HANDLE my_process{ GetCurrentProcess( ) };
 	const DWORD my_pid{ GetCurrentProcessId( ) };
 
@@ -42,7 +48,8 @@ int main( )
 				if ( current_handle->ProcessId == my_pid )
 					continue;
 
-				/* we need a handle to the process with PROCESS_DUP_HANDLE access rights */
+				/* we need a handle to the process with at least PROCESS_DUP_HANDLE access rights */
+				/* PROCESS_VM_OPERATION | PROCESS_VM_WRITE is needed for GetModuleFileNameEx to work */
 				const HANDLE process_handle{ OpenProcess( PROCESS_DUP_HANDLE | PROCESS_VM_OPERATION | PROCESS_VM_WRITE, false, current_handle->ProcessId ) };
 				if ( !process_handle )
 					continue;
